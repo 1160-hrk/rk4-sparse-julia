@@ -1,4 +1,7 @@
-# Benchmark Results for Two-Level System Simulation
+# Benchmark Results for Two-Level System Simulation (v0.0.1)
+
+_Version: v0.0.1_  
+_Date: 2025-07-09_
 
 ## Overview
 This document summarizes the performance comparison between dense and sparse matrix implementations of the Runge-Kutta 4th order method for simulating a two-level quantum system.
