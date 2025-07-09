@@ -1,0 +1,20 @@
+{
+    "name": "Julia Dev Container",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+    },
+    "postCreateCommand": "julia --project=. -e 'using Pkg; Pkg.instantiate()'",
+    "workspaceFolder": "/workspace",
+    "remoteUser": "root",
+    "extensions": [
+        "julialang.language-julia",         // Julia 拡張
+        "ms-toolsai.jupyter",               // Jupyter Notebook サポート
+        "ms-azuretools.vscode-docker",     // Docker 管理
+        "eamodio.gitlens",                 // Git 強化
+        "mhutchie.git-graph",             // Git 可視化
+        "ms-python.python"                // 補助的に Python も扱える
+    ]
+}
