@@ -7,7 +7,13 @@
     "customizations": {
         "vscode": {
             "extensions": [
-                "julialang.language-julia"
+                "julialang.language-julia",
+                "eamodio.gitlens",
+                "GitHub.vscode-pull-request-github",
+                "mhutchie.git-graph",
+                "oderwat.indent-rainbow",
+                "streetsidesoftware.code-spell-checker",
+                "yzhang.markdown-all-in-one"
             ],
     "settings": {
                 "julia.environmentPath": "/workspace"
