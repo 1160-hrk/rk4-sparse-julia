@@ -198,7 +198,37 @@ println("標準偏差: ", std(bench_mt.times) / 1e6, " ms")
 println("メモリアロケーション: ", bench_mt.memory / 1024, " KiB")
 println("アロケーション回数: ", bench_mt.allocs, " 回")
 
-# スレッド数の表示
+# SIMD最適化版の計算速度の測定
+println("\nSIMD最適化版の計算時間の測定:")
+@time begin
+    rk4_cpu_sparse_simd(
+        H0_sparse, mux_sparse, muy_sparse,
+        Ex, Ey, psi0, dt*2;
+        return_traj=true, stride=stride, renorm=false
+    )
+end
+
+# SIMD最適化版の詳細なベンチマーク
+println("\nSIMD最適化版の詳細なベンチマーク:")
+bench_simd = @benchmark rk4_cpu_sparse_simd(
+    $H0_sparse, $mux_sparse, $muy_sparse,
+    $Ex, $Ey, $psi0, $dt*2;
+    return_traj=true, stride=$stride, renorm=false
+)
+display(bench_simd)
+
+# SIMD最適化版の統計情報の表示
+println("\nSIMD最適化版の統計情報:")
+println("試行回数: ", length(bench_simd.times), " 回")
+println("最小実行時間: ", minimum(bench_simd.times) / 1e6, " ms")
+println("平均実行時間: ", mean(bench_simd.times) / 1e6, " ms")
+println("最大実行時間: ", maximum(bench_simd.times) / 1e6, " ms")
+println("標準偏差: ", std(bench_simd.times) / 1e6, " ms")
+println("メモリアロケーション: ", bench_simd.memory / 1024, " KiB")
+println("アロケーション回数: ", bench_simd.allocs, " 回")
+
+# システム情報の表示
 println("\nシステム情報:")
 println("利用可能なスレッド数: ", Threads.nthreads())
 println("BLASスレッド数: ", BLAS.get_num_threads())
+println("SIMD命令セット: ", LoopVectorization.VectorizationBase.register_size())

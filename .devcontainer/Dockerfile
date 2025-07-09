@@ -1,15 +1,26 @@
-FROM julia:1.10
+# ベースイメージとしてJulia 1.10.0を使用
+FROM julia:1.10.0
 
+# 作業ディレクトリを設定
 WORKDIR /workspace
 
+# 必要なパッケージを事前にインストール
+RUN julia -e 'using Pkg; \
+    Pkg.add([ \
+        "BenchmarkTools", \
+        "Plots", \
+        "LoopVectorization" \
+    ]); \
+    Pkg.precompile()'
 
-# Install Git
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+# Project.tomlとManifest.tomlをコピー
+COPY Project.toml .
 
-# Preinstall some common Julia packages (optional)
-RUN julia -e 'using Pkg; Pkg.add("IJulia"); Pkg.add("Plots")'
+# プロジェクトの依存関係を解決
+RUN julia --project -e 'using Pkg; Pkg.resolve()'
 
-# Initialize project environment
-RUN julia -e 'using Pkg; Pkg.activate(".")'
+# ソースコードをコピー
+COPY src/ src/
 
-CMD [ "julia" ]
+# コンテナ起動時のコマンド
+CMD ["julia", "--project"]

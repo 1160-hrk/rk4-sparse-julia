@@ -1,6 +1,7 @@
 using LinearAlgebra
 using SparseArrays
 using Base.Threads
+using LoopVectorization
 
 function rk4_cpu(
     H0::Matrix{ComplexF64},
@@ -282,6 +283,135 @@ function rk4_cpu_sparse_mt(
         if renorm
             norm_factor = sqrt(real(psi' * psi))
             @threads for i in 1:dim
+                psi[i] /= norm_factor
+            end
+        end
+
+        if return_traj && (s % stride == 0)
+            out[:, idx] .= psi
+            idx += 1
+        end
+    end
+
+    return return_traj ? out : reshape(psi, :, 1)
+end
+
+function rk4_cpu_sparse_simd(
+    H0::SparseMatrixCSC{ComplexF64,Int},
+    mux::SparseMatrixCSC{ComplexF64,Int},
+    muy::SparseMatrixCSC{ComplexF64,Int},
+    Ex::Vector{Float64},
+    Ey::Vector{Float64},
+    psi0::Vector{ComplexF64},
+    dt::Float64;
+    return_traj::Bool = true,
+    stride::Int = 1,
+    renorm::Bool = false
+)
+    steps = (length(Ex) - 1) ÷ 2
+    Ex3 = hcat(Ex[1:2:end-2], Ex[2:2:end-1], Ex[3:2:end])
+    Ey3 = hcat(Ey[1:2:end-2], Ey[2:2:end-1], Ey[3:2:end])
+
+    psi = copy(psi0)
+    dim = length(psi)
+    n_out = steps ÷ stride + 1
+    out = Matrix{ComplexF64}(undef, dim, n_out)
+    out[:, 1] .= psi
+
+    # バッファの初期化（メモリアライメントを考慮）
+    buf = Vector{ComplexF64}(undef, dim)
+    k1 = Vector{ComplexF64}(undef, dim)
+    k2 = Vector{ComplexF64}(undef, dim)
+    k3 = Vector{ComplexF64}(undef, dim)
+    k4 = Vector{ComplexF64}(undef, dim)
+    temp = Vector{ComplexF64}(undef, dim)
+
+    # スパース行列の準備
+    rows = rowvals(H0)
+    cols = Vector{Int}(undef, nnz(H0))
+    for i in 1:length(rows)
+        cols[i] = rows[i]
+    end
+    
+    # 各行列から値を抽出
+    H0_data = nonzeros(H0)
+    mux_data = nonzeros(mux)
+    muy_data = nonzeros(muy)
+    
+    # 3つのスパース行列を事前に確保
+    H1 = copy(H0)
+    H2 = copy(H0)
+    H4 = copy(H0)
+    
+    # 値を格納するバッファ
+    vals1 = Vector{ComplexF64}(undef, nnz(H0))
+    vals2 = similar(vals1)
+    vals4 = similar(vals1)
+
+    idx = 2
+    for s in 1:steps
+        ex1, ex2, ex4 = Ex3[s, :]
+        ey1, ey2, ey4 = Ey3[s, :]
+
+        # 行列要素の更新（SIMD最適化）
+        @turbo warn_check_args=false for i in eachindex(H0_data)
+            vals1[i] = H0_data[i] + mux_data[i] * ex1 + muy_data[i] * ey1
+            vals2[i] = H0_data[i] + mux_data[i] * ex2 + muy_data[i] * ey2
+            vals4[i] = H0_data[i] + mux_data[i] * ex4 + muy_data[i] * ey4
+        end
+        
+        # スパース行列の更新
+        nonzeros(H1) .= vals1
+        nonzeros(H2) .= vals2
+        nonzeros(H4) .= vals4
+
+        # 行列-ベクトル積の計算
+        mul!(temp, H1, psi)
+        @turbo warn_check_args=false for i in eachindex(k1)
+            k1[i] = -im * temp[i]
+        end
+        
+        @turbo warn_check_args=false for i in eachindex(buf)
+            buf[i] = psi[i] + 0.5 * dt * k1[i]
+        end
+        
+        mul!(temp, H2, buf)
+        @turbo warn_check_args=false for i in eachindex(k2)
+            k2[i] = -im * temp[i]
+        end
+        
+        @turbo warn_check_args=false for i in eachindex(buf)
+            buf[i] = psi[i] + 0.5 * dt * k2[i]
+        end
+        
+        mul!(temp, H2, buf)
+        @turbo warn_check_args=false for i in eachindex(k3)
+            k3[i] = -im * temp[i]
+        end
+        
+        @turbo warn_check_args=false for i in eachindex(buf)
+            buf[i] = psi[i] + dt * k3[i]
+        end
+        
+        mul!(temp, H4, buf)
+        @turbo warn_check_args=false for i in eachindex(k4)
+            k4[i] = -im * temp[i]
+        end
+
+        # 状態ベクトルの更新（SIMD最適化）
+        @turbo warn_check_args=false for i in eachindex(psi)
+            psi[i] += (dt / 6.0) * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i])
+        end
+
+        if renorm
+            # ノルムの計算（SIMD最適化）
+            norm_sq = zero(Float64)
+            @turbo warn_check_args=false for i in eachindex(psi)
+                norm_sq += abs2(psi[i])
+            end
+            norm_factor = sqrt(norm_sq)
+            
+            @turbo warn_check_args=false for i in eachindex(psi)
                 psi[i] /= norm_factor
             end
         end
