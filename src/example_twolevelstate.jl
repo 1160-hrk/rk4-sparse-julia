@@ -167,3 +167,38 @@ println("最大実行時間: ", maximum(bench_sparse.times) / 1e6, " ms")
 println("標準偏差: ", std(bench_sparse.times) / 1e6, " ms")
 println("メモリアロケーション: ", bench_sparse.memory / 1024, " KiB")
 println("アロケーション回数: ", bench_sparse.allocs, " 回")
+
+# マルチスレッド版の計算速度の測定
+println("\nマルチスレッド版の計算時間の測定:")
+BLAS.set_num_threads(Threads.nthreads())  # BLASの並列化を有効化
+@time begin
+    rk4_cpu_sparse_mt(
+        H0_sparse, mux_sparse, muy_sparse,
+        Ex, Ey, psi0, dt*2;
+        return_traj=true, stride=stride, renorm=false
+    )
+end
+
+# マルチスレッド版の詳細なベンチマーク
+println("\nマルチスレッド版の詳細なベンチマーク:")
+bench_mt = @benchmark rk4_cpu_sparse_mt(
+    $H0_sparse, $mux_sparse, $muy_sparse,
+    $Ex, $Ey, $psi0, $dt*2;
+    return_traj=true, stride=$stride, renorm=false
+)
+display(bench_mt)
+
+# マルチスレッド版の統計情報の表示
+println("\nマルチスレッド版の統計情報:")
+println("試行回数: ", length(bench_mt.times), " 回")
+println("最小実行時間: ", minimum(bench_mt.times) / 1e6, " ms")
+println("平均実行時間: ", mean(bench_mt.times) / 1e6, " ms")
+println("最大実行時間: ", maximum(bench_mt.times) / 1e6, " ms")
+println("標準偏差: ", std(bench_mt.times) / 1e6, " ms")
+println("メモリアロケーション: ", bench_mt.memory / 1024, " KiB")
+println("アロケーション回数: ", bench_mt.allocs, " 回")
+
+# スレッド数の表示
+println("\nシステム情報:")
+println("利用可能なスレッド数: ", Threads.nthreads())
+println("BLASスレッド数: ", BLAS.get_num_threads())

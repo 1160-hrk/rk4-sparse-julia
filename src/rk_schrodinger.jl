@@ -1,5 +1,6 @@
 using LinearAlgebra
 using SparseArrays
+using Base.Threads
 
 function rk4_cpu(
     H0::Matrix{ComplexF64},
@@ -152,6 +153,137 @@ function rk4_cpu_sparse(
 
         if renorm
             psi ./= sqrt(real(psi' * psi))
+        end
+
+        if return_traj && (s % stride == 0)
+            out[:, idx] .= psi
+            idx += 1
+        end
+    end
+
+    return return_traj ? out : reshape(psi, :, 1)
+end
+
+function rk4_cpu_sparse_mt(
+    H0::SparseMatrixCSC{ComplexF64,Int},
+    mux::SparseMatrixCSC{ComplexF64,Int},
+    muy::SparseMatrixCSC{ComplexF64,Int},
+    Ex::Vector{Float64},
+    Ey::Vector{Float64},
+    psi0::Vector{ComplexF64},
+    dt::Float64;
+    return_traj::Bool = true,
+    stride::Int = 1,
+    renorm::Bool = false
+)
+    steps = (length(Ex) - 1) ÷ 2
+    Ex3 = hcat(Ex[1:2:end-2], Ex[2:2:end-1], Ex[3:2:end])
+    Ey3 = hcat(Ey[1:2:end-2], Ey[2:2:end-1], Ey[3:2:end])
+
+    psi = copy(psi0)
+    dim = length(psi)
+    n_out = steps ÷ stride + 1
+    out = Matrix{ComplexF64}(undef, dim, n_out)
+    out[:, 1] .= psi
+    idx = 2
+
+    # バッファの初期化
+    buf = similar(psi)
+    k1 = similar(psi)
+    k2 = similar(psi)
+    k3 = similar(psi)
+    k4 = similar(psi)
+
+    # スパース行列の準備
+    rows = Vector{Int}()
+    cols = Vector{Int}()
+    
+    # 非ゼロ要素のパターンを収集
+    for (i, j, v) in zip(findnz(H0)..., findnz(mux)..., findnz(muy)...)
+        if !iszero(v)
+            push!(rows, i)
+            push!(cols, j)
+        end
+    end
+    
+    # 重複を除去
+    unique_indices = unique(tuple.(rows, cols))
+    rows = first.(unique_indices)
+    cols = last.(unique_indices)
+    
+    # 各行列から値を抽出
+    H0_data = [H0[i,j] for (i,j) in unique_indices]
+    mux_data = [mux[i,j] for (i,j) in unique_indices]
+    muy_data = [muy[i,j] for (i,j) in unique_indices]
+    
+    # 3つのスパース行列を事前に確保
+    H1 = sparse(rows, cols, zeros(ComplexF64, length(rows)), dim, dim)
+    H2 = sparse(rows, cols, zeros(ComplexF64, length(rows)), dim, dim)
+    H4 = sparse(rows, cols, zeros(ComplexF64, length(rows)), dim, dim)
+    
+    # 値を格納するバッファ
+    vals1 = Vector{ComplexF64}(undef, length(rows))
+    vals2 = Vector{ComplexF64}(undef, length(rows))
+    vals4 = Vector{ComplexF64}(undef, length(rows))
+
+    # 行列要素の更新用バッファ
+    chunk_size = length(rows) ÷ Threads.nthreads()
+    
+    for s in 1:steps
+        ex1, ex2, ex4 = Ex3[s, :]
+        ey1, ey2, ey4 = Ey3[s, :]
+
+        # 行列要素の更新を並列化
+        @threads for tid in 1:Threads.nthreads()
+            start_idx = (tid - 1) * chunk_size + 1
+            end_idx = tid == Threads.nthreads() ? length(rows) : tid * chunk_size
+            
+            @views begin
+                @. vals1[start_idx:end_idx] = H0_data[start_idx:end_idx] + 
+                    mux_data[start_idx:end_idx] * ex1 + 
+                    muy_data[start_idx:end_idx] * ey1
+                
+                @. vals2[start_idx:end_idx] = H0_data[start_idx:end_idx] + 
+                    mux_data[start_idx:end_idx] * ex2 + 
+                    muy_data[start_idx:end_idx] * ey2
+                
+                @. vals4[start_idx:end_idx] = H0_data[start_idx:end_idx] + 
+                    mux_data[start_idx:end_idx] * ex4 + 
+                    muy_data[start_idx:end_idx] * ey4
+            end
+        end
+        
+        # スパース行列の更新
+        nonzeros(H1) .= vals1
+        nonzeros(H2) .= vals2
+        nonzeros(H4) .= vals4
+
+        # 行列-ベクトル積の計算（BLASが自動的に並列化）
+        mul!(k1, H1, psi)
+        k1 .*= -im
+        
+        @. buf = psi + 0.5 * dt * k1
+        mul!(k2, H2, buf)
+        k2 .*= -im
+        
+        @. buf = psi + 0.5 * dt * k2
+        mul!(k3, H2, buf)
+        k3 .*= -im
+        
+        @. buf = psi + dt * k3
+        mul!(k4, H4, buf)
+        k4 .*= -im
+
+        # 状態ベクトルの更新を並列化
+        @threads for i in 1:dim
+            psi[i] += (dt / 6.0) * (k1[i] + 2k2[i] + 2k3[i] + k4[i])
+        end
+
+        if renorm
+            norm_factor = sqrt(real(psi' * psi))
+            @threads for i in 1:dim
+                psi[i] /= norm_factor
+            end
         end
 
         if return_traj && (s % stride == 0)
