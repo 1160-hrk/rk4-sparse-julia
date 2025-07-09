@@ -95,7 +95,6 @@ function rk4_cpu_sparse(
     # スパース行列の準備
     rows = Vector{Int}()
     cols = Vector{Int}()
-    vals = Vector{ComplexF64}()
     
     # 非ゼロ要素のパターンを収集
     for (i, j, v) in zip(findnz(H0)..., findnz(mux)..., findnz(muy)...)
@@ -115,30 +114,39 @@ function rk4_cpu_sparse(
     mux_data = [mux[i,j] for (i,j) in unique_indices]
     muy_data = [muy[i,j] for (i,j) in unique_indices]
     
-    # 初期スパース行列の作成
-    H = sparse(rows, cols, zeros(ComplexF64, length(rows)), dim, dim)
+    # 3つのスパース行列を事前に確保
+    H1 = sparse(rows, cols, zeros(ComplexF64, length(rows)), dim, dim)
+    H2 = sparse(rows, cols, zeros(ComplexF64, length(rows)), dim, dim)
+    H4 = sparse(rows, cols, zeros(ComplexF64, length(rows)), dim, dim)
+    
+    # 値を格納するバッファ
+    vals1 = Vector{ComplexF64}(undef, length(rows))
+    vals2 = Vector{ComplexF64}(undef, length(rows))
+    vals4 = Vector{ComplexF64}(undef, length(rows))
 
     for s in 1:steps
         ex1, ex2, ex4 = Ex3[s, :]
         ey1, ey2, ey4 = Ey3[s, :]
 
-        # 行列要素の更新
-        vals = H0_data .+ mux_data .* ex1 .+ muy_data .* ey1
-        H = sparse(rows, cols, vals, dim, dim)
-        k1 .= -im .* (H * psi)
+        # 行列要素の更新（nonzeros()を直接更新）
+        @. vals1 = H0_data + mux_data * ex1 + muy_data * ey1
+        @. vals2 = H0_data + mux_data * ex2 + muy_data * ey2
+        @. vals4 = H0_data + mux_data * ex4 + muy_data * ey4
+        
+        nonzeros(H1) .= vals1
+        nonzeros(H2) .= vals2
+        nonzeros(H4) .= vals4
+
+        k1 .= -im .* (H1 * psi)
         buf .= psi .+ 0.5 * dt .* k1
 
-        vals = H0_data .+ mux_data .* ex2 .+ muy_data .* ey2
-        H = sparse(rows, cols, vals, dim, dim)
-        k2 .= -im .* (H * buf)
+        k2 .= -im .* (H2 * buf)
         buf .= psi .+ 0.5 * dt .* k2
 
-        k3 .= -im .* (H * buf)
+        k3 .= -im .* (H2 * buf)
         buf .= psi .+ dt .* k3
 
-        vals = H0_data .+ mux_data .* ex4 .+ muy_data .* ey4
-        H = sparse(rows, cols, vals, dim, dim)
-        k4 .= -im .* (H * buf)
+        k4 .= -im .* (H4 * buf)
 
         psi .+= (dt / 6.0) .* (k1 .+ 2k2 .+ 2k3 .+ k4)
 
