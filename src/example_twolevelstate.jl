@@ -4,7 +4,9 @@ using Pkg
 Pkg.add("BenchmarkTools")
 using BenchmarkTools
 
-include("rk_schrodinger.jl")  # 上で定義した関数をここに保存しておく
+include("rk_schrodinger.jl") 
+include("plots_config.jl")
+using .PlotsConfig
 
 # -------------------------------------------
 # 二準位系の定義
