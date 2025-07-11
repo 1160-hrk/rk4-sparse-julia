@@ -13,7 +13,9 @@
                 "mhutchie.git-graph",
                 "oderwat.indent-rainbow",
                 "streetsidesoftware.code-spell-checker",
-                "yzhang.markdown-all-in-one"
+                "yzhang.markdown-all-in-one",
+                "ms-python.python",
+                "ms-toolsai.jupyter"
             ],
     "settings": {
                 "julia.environmentPath": "/workspace"
